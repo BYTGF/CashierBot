@@ -1,0 +1,64 @@
+# Kasir Bot stack — n8n + Telegram polling + Google Sheets/Drive + OpenRouter.
+# Mode POLLING: tidak butuh domain/port publik — bot menarik pesan dari Telegram
+# lewat container tg-poller (lihat README §Setup, PRD §Arsitektur).
+# Postgres di stack ini hanya untuk data internal n8n; data kasir ada di Google Sheets.
+#
+# CATATAN PORT: n8n editor di-bind ke 127.0.0.1:5679 — aman secara default
+# (akses via SSH tunnel: ssh -L 5679:127.0.0.1:5679 <vps>).
+# Kalau mau akses langsung dari tailnet, ganti jadi "<ip-tailscale>:5679:5678"
+# seperti pola Spending Bot. JANGAN dibuka ke 0.0.0.0 di VPS publik.
+
+name: kasir-bot
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    restart: always
+    container_name: kasir-bot-n8n
+    ports:
+      - "127.0.0.1:5679:5678"
+    environment:
+      N8N_RUNNERS_ENABLED: "true"
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE}
+      TZ: ${TZ}
+      # --- DB internal n8n (credentials + execution log) ---
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: "5432"
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB}
+      DB_POSTGRESDB_USER: ${POSTGRES_USER}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - kasir_n8n_data:/home/node/.n8n
+      - ./workflow:/import:ro
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:15
+    restart: always
+    container_name: kasir-bot-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - kasir_postgres_data:/var/lib/postgresql/data
+
+  # ---- Telegram long-polling -> n8n webhook (internal Docker) ----
+  tg-poller:
+    image: python:3.12-alpine
+    restart: always
+    container_name: kasir-bot-poller
+    command: python /app/telegram-poller.py
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      N8N_WEBHOOK_URL: http://n8n:5678/webhook/kasir-bot-in
+    volumes:
+      - ./telegram-poller.py:/app/telegram-poller.py:ro
+    depends_on:
+      - n8n
+
+volumes:
+  kasir_n8n_data:
+  kasir_postgres_data:

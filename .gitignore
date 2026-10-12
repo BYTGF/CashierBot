@@ -1,0 +1,10 @@
+# Secrets & lokal — JANGAN commit
+.env
+.env.local
+creds.local.json
+.scratch/
+.zcode/
+
+# OS / editor
+Thumbs.db
+Desktop.ini
